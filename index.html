@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#123b32"><link rel="manifest" href="manifest.webmanifest">
+<title>Mangaldeep Bhawan | Hotel Manager</title>
+<style>
+:root{font-family:system-ui,Arial;color:#17231f;background:#f3f6f4}*{box-sizing:border-box}
+body{margin:0}header{background:#123b32;color:white;padding:18px 16px}header h1{font-size:20px;margin:0}header p{margin:5px 0 0;color:#d7e7df;font-size:13px}
+main{max-width:900px;margin:auto;padding:14px}.panel{background:white;border-radius:14px;padding:16px;margin:12px 0;box-shadow:0 2px 10px #123b3210}
+input,select,button{font:inherit;padding:11px;border:1px solid #ccd7d1;border-radius:9px;width:100%;margin:5px 0}
+button{background:#155c49;color:white;border:0;font-weight:650;cursor:pointer}.secondary{background:#e7efeb;color:#123b32}.danger{background:#a52e2e}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:10px}.room{padding:13px;border-radius:11px;background:#edf4f0}.room strong{display:block;font-size:18px}.muted{color:#64746c;font-size:13px}
+nav{display:flex;gap:7px;flex-wrap:wrap}nav button{width:auto;flex:1;min-width:90px}.hidden{display:none!important}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.item{padding:10px 0;border-bottom:1px solid #e5ebe7}
+@media(max-width:480px){.row{grid-template-columns:1fr}}
+</style></head>
+<body>
+<header><h1>Mangaldeep Bhawan</h1><p>Hotel Management • Kahilipara, Guwahati</p></header>
+<main>
+<section id="login" class="panel">
+<h2>Staff / Owner Login</h2><p class="muted">Use the email and password already created in Firebase Authentication.</p>
+<input id="email" type="email" placeholder="Email address" autocomplete="username">
+<input id="password" type="password" placeholder="Password" autocomplete="current-password">
+<button id="loginBtn">Sign in</button><p id="loginMsg" class="muted"></p>
+</section>
+<section id="app" class="hidden">
+<div class="panel"><div class="row"><div><b id="who"></b><div class="muted" id="role"></div></div><button id="logout" class="secondary">Sign out</button></div></div>
+<nav class="panel">
+<button data-tab="rooms">Rooms</button><button data-tab="bookings">Bookings</button><button data-tab="payments">Payments</button><button data-tab="expenses">Expenses</button>
+</nav>
+<section id="rooms" class="panel"><h2>Room status</h2><div id="roomGrid" class="grid"></div><p class="muted">Five rooms are created automatically on first successful sign-in.</p></section>
+<section id="bookings" class="panel hidden"><h2>New booking / Check-in</h2>
+<div class="row"><input id="guestName" placeholder="Guest full name"><input id="guestPhone" placeholder="Phone number"></div>
+<div class="row"><select id="roomSelect"><option value="">Choose room</option></select><input id="rate" type="number" min="0" placeholder="Room rate (₹)"></div>
+<div class="row"><label>Check-in <input id="checkin" type="date"></label><label>Check-out <input id="checkout" type="date"></label></div>
+<button id="addBooking">Save booking</button><p id="bookingMsg" class="muted"></p><h3>Recent bookings</h3><div id="bookingList"></div>
+</section>
+<section id="payments" class="panel hidden"><h2>Record payment</h2><input id="paymentBooking" placeholder="Booking ID"><input id="paymentAmount" type="number" min="1" placeholder="Amount (₹)"><select id="paymentMethod"><option>Cash</option><option>UPI</option><option>Card</option><option>Bank transfer</option></select><button id="addPayment">Save payment</button><div id="paymentList"></div></section>
+<section id="expenses" class="panel hidden"><h2>Expenses (Owner only)</h2><input id="expenseTitle" placeholder="Expense description"><input id="expenseAmount" type="number" min="1" placeholder="Amount (₹)"><button id="addExpense">Save expense</button><div id="expenseList"></div></section>
+</section>
+</main>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { getFirestore, collection, addDoc, getDocs, doc, setDoc, updateDoc, query, orderBy, limit, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+// Firebase web configuration for Mangaldeep Bhawan project
+const firebaseConfig = {
+  apiKey: "AIzaSyCmVLXxoQGRYrhR20Tfl2Jcqrtck8WfZfs",
+  authDomain: "mangaldeep-bhawan.firebaseapp.com",
+  projectId: "mangaldeep-bhawan",
+  storageBucket: "mangaldeep-bhawan.firebasestorage.app",
+  messagingSenderId: "297015794011",
+  appId: "1:297015794011:web:e5f1ca042c0395fb32227e",
+  measurementId: "G-RKPJT5GTNY"
+};
+const OWNER="abdin.aye@gmail.com", STAFF="pfc.dar@gmail.com";
+const app=initializeApp(firebaseConfig), auth=getAuth(app), db=getFirestore(app);
+if ("serviceWorker" in navigator) { window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(()=>{})); }
+const $=id=>document.getElementById(id);
+let currentUser=null, isOwner=false;
+const show=(id,on)=>$(id).classList.toggle("hidden",!on);
+const msg=(id,s)=>$(id).textContent=s;
+$("loginBtn").onclick=async()=>{msg("loginMsg","Signing in…");try{await signInWithEmailAndPassword(auth,$("email").value.trim(),$("password").value);msg("loginMsg","");}catch(e){msg("loginMsg",e.message)}};
+$("logout").onclick=()=>signOut(auth);
+onAuthStateChanged(auth,async user=>{
+ currentUser=user;
+ if(!user){show("login",true);show("app",false);return;}
+ const email=(user.email||"").toLowerCase(); isOwner=email===OWNER;
+ if(!isOwner && email!==STAFF){await signOut(auth);msg("loginMsg","This account is not authorized for this hotel.");return;}
+ show("login",false);show("app",true);$("who").textContent=user.email;$("role").textContent=isOwner?"Owner access":"Staff access";
+ show("expenses",isOwner);await seedRooms();await refreshAll();
+});
+async function seedRooms(){
+ const snap=await getDocs(collection(db,"rooms"));
+ if(snap.empty){for(let n=1;n<=5;n++) await setDoc(doc(db,"rooms","room-"+n),{name:"Room "+n,status:"Available",updatedAt:serverTimestamp()});}
+}
+async function refreshAll(){
+ const rs=await getDocs(collection(db,"rooms"));$("roomGrid").innerHTML="";$("roomSelect").innerHTML='<option value="">Choose room</option>';
+ rs.forEach(d=>{let r=d.data();let div=document.createElement("div");div.className="room";div.innerHTML=`<strong>${r.name}</strong><span>${r.status}</span>`;$("roomGrid").append(div);let o=document.createElement("option");o.value=d.id;o.textContent=r.name+" — "+r.status;$("roomSelect").append(o);});
+ await loadBookings();await loadPayments();if(isOwner)await loadExpenses();
+}
+async function loadBookings(){
+ const s=await getDocs(query(collection(db,"bookings"),orderBy("createdAt","desc"),limit(30)));$("bookingList").innerHTML="";
+ s.forEach(d=>{let b=d.data(),el=document.createElement("div");el.className="item";el.textContent=`${b.guestName} • ${b.roomName} • ₹${b.rate} • ${b.status} • ID: ${d.id}`;$("bookingList").append(el);});
+}
+$("addBooking").onclick=async()=>{
+ try{let roomId=$("roomSelect").value,roomName=$("roomSelect").selectedOptions[0]?.textContent.split(" — ")[0];if(!roomId||!$("guestName").value.trim()||!$("checkin").value||!$("checkout").value)throw Error("Fill guest, room and both dates.");
+ let r=Number($("rate").value);if(!(r>0))throw Error("Enter a valid room rate.");
+ let b=await addDoc(collection(db,"bookings"),{guestName:$("guestName").value.trim(),phone:$("guestPhone").value.trim(),roomId,roomName,rate:r,checkin:$("checkin").value,checkout:$("checkout").value,status:"Checked-in",createdBy:currentUser.email,createdAt:serverTimestamp()});
+ await updateDoc(doc(db,"rooms",roomId),{status:"Occupied",updatedAt:serverTimestamp()});msg("bookingMsg","Saved. Booking ID: "+b.id);await refreshAll();
+ }catch(e){msg("bookingMsg",e.message)}
+};
+async function loadPayments(){let s=await getDocs(query(collection(db,"payments"),orderBy("createdAt","desc"),limit(30)));$("paymentList").innerHTML="";s.forEach(d=>{let p=d.data(),el=document.createElement("div");el.className="item";el.textContent=`₹${p.amount} • ${p.method} • Booking ${p.bookingId}`;$("paymentList").append(el);});}
+$("addPayment").onclick=async()=>{try{let a=Number($("paymentAmount").value),id=$("paymentBooking").value.trim();if(!(a>0)||!id)throw Error("Enter booking ID and amount.");await addDoc(collection(db,"payments"),{bookingId:id,amount:a,method:$("paymentMethod").value,createdBy:currentUser.email,createdAt:serverTimestamp()});await loadPayments();msg("paymentList","Payment saved.");}catch(e){msg("paymentList",e.message)}};
+async function loadExpenses(){let s=await getDocs(query(collection(db,"expenses"),orderBy("createdAt","desc"),limit(30)));$("expenseList").innerHTML="";s.forEach(d=>{let x=d.data(),el=document.createElement("div");el.className="item";el.textContent=`${x.title} • ₹${x.amount}`;$("expenseList").append(el);});}
+$("addExpense").onclick=async()=>{try{let a=Number($("expenseAmount").value),t=$("expenseTitle").value.trim();if(!isOwner)throw Error("Owner only.");if(!(a>0)||!t)throw Error("Enter description and amount.");await addDoc(collection(db,"expenses"),{title:t,amount:a,createdBy:currentUser.email,createdAt:serverTimestamp()});await loadExpenses();}catch(e){msg("expenseList",e.message)}};
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{["rooms","bookings","payments","expenses"].forEach(id=>show(id,id===b.dataset.tab && (id!=="expenses"||isOwner)));});
+</script></body></html>
